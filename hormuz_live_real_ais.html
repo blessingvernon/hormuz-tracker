@@ -1,0 +1,207 @@
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+#wrap{background:#0a0a0a;border-radius:8px;overflow:hidden;font-family:'Courier New',monospace;color:#fff}
+#hdr{background:#111;border-bottom:1px solid #2a2a2a;padding:7px 14px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+#title{color:#FF6600;font-size:12px;font-weight:bold;letter-spacing:1.5px;flex:1}
+.st{text-align:center;min-width:44px}
+.sv{font-size:16px;font-weight:bold;color:#FF6600}
+.sl{font-size:9px;color:#555;letter-spacing:0.5px}
+#conn{font-size:10px;padding:2px 8px;border-radius:3px;background:#1a2a1a;color:#5AC85A}
+#conn.disconnected{background:#2a1500;color:#FF8833}
+#conn.connecting{background:#1a1a2a;color:#6688ff}
+#utc{font-size:10px;color:#444}
+canvas{display:block;width:100%;cursor:crosshair}
+#panel{background:#0c0c0c;border-top:1px solid #1e1e1e;max-height:155px;overflow-y:auto}
+#panel::-webkit-scrollbar{width:3px}
+#panel::-webkit-scrollbar-thumb{background:#2a2a2a}
+.row{display:grid;grid-template-columns:24px 1fr 60px 55px 55px;gap:6px;padding:5px 12px;border-bottom:1px solid #161616;font-size:10px;align-items:center;cursor:pointer}
+.row:hover{background:#131313}
+.rh{color:#444;font-size:9px;letter-spacing:0.5px;border-bottom:1px solid #2a2a2a!important}
+.fn{color:#ccc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ft{color:#555;font-size:9px}
+.spd{color:#5AC85A;text-align:right}
+.hdg{color:#FF6600;text-align:right}
+.tag{font-size:8px;padding:1px 4px;border-radius:2px;text-align:center}
+.tt{background:#1a2a1a;color:#5AC85A}
+.ta{background:#2a1500;color:#FF8833}
+.ts{background:#151520;color:#6688ff}
+#ticker{background:#0d0d0d;border-top:1px solid #1a1a1a;padding:4px 0;overflow:hidden}
+#tick{display:inline-block;white-space:nowrap;font-size:9px;color:#FF6600;animation:scroll 60s linear infinite}
+@keyframes scroll{from{transform:translateX(100vw)}to{transform:translateX(-100%)}}
+#ldot{width:6px;height:6px;background:#5AC85A;border-radius:50%;display:inline-block;margin-right:6px;animation:blink 1.2s ease-in-out infinite}
+#ldot.off{background:#FF8833}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.2}}
+#empty{padding:20px;text-align:center;color:#444;font-size:11px}
+</style>
+
+<div id="wrap">
+  <div id="hdr">
+    <div id="title"><span id="ldot"></span>STRAIT OF HORMUZ — LIVE AIS FEED</div>
+    <div class="st"><div class="sv" id="sv-all">0</div><div class="sl">VESSELS</div></div>
+    <div class="st"><div class="sv" id="sv-move">0</div><div class="sl">UNDERWAY</div></div>
+    <div class="st"><div class="sv" id="sv-anc" style="color:#FF8833">0</div><div class="sl">ANCHORED</div></div>
+    <div class="st"><div class="sv" id="sv-msg">0</div><div class="sl">MSG/MIN</div></div>
+    <span id="conn" class="connecting">CONNECTING...</span>
+    <div id="utc"></div>
+  </div>
+  <canvas id="c" height="360"></canvas>
+  <div id="panel">
+    <div class="row rh"><div></div><div>VESSEL NAME</div><div class="spd">SPD(KT)</div><div class="hdg">HDG</div><div style="text-align:center">STATUS</div></div>
+    <div id="list"><div id="empty">Waiting for live AIS signals from the Strait of Hormuz...</div></div>
+  </div>
+  <div id="ticker"><div id="tick">Connecting to AISstream.io — live vessel data loading...</div></div>
+</div>
+
+<script>
+const API_KEY = "f30cc3809a16bb5043a0763b819750a0b06f8c18";
+const W=700,H=360;
+const c=document.getElementById('c');
+c.width=W;c.height=H;
+const ctx=c.getContext('2d');
+const LNG0=54.0,LNG1=59.5,LAT0=24.2,LAT1=28.0;
+function px(lng,lat){return[(lng-LNG0)/(LNG1-LNG0)*W,(LAT1-lat)/(LAT1-LAT0)*H]}
+
+const IRAN=[[54.0,27.8],[59.5,27.8],[59.5,25.5],[59.0,25.7],[58.5,26.0],[58.0,26.4],[57.5,26.7],[57.2,27.0],[56.8,27.1],[56.3,27.2],[56.0,26.9],[55.7,26.8],[55.3,26.7],[54.9,26.8],[54.5,27.0],[54.0,27.2]];
+const ARAB=[[54.0,24.2],[59.5,24.2],[59.5,24.5],[58.5,24.5],[58.0,24.7],[57.5,24.9],[57.0,25.2],[56.8,25.5],[56.6,25.8],[56.5,26.1],[56.4,26.3],[56.35,26.45],[56.3,26.3],[56.2,26.1],[56.0,25.9],[55.8,25.7],[55.6,25.5],[55.3,25.3],[55.0,25.0],[54.6,24.6],[54.0,24.5]];
+const MUSANDAM=[[56.2,26.1],[56.35,26.2],[56.45,26.4],[56.5,26.5],[56.55,26.42],[56.5,26.3],[56.38,26.15],[56.25,26.05]];
+
+function drawLand(pts,color){
+  ctx.beginPath();
+  const[x0,y0]=px(pts[0][0],pts[0][1]);ctx.moveTo(x0,y0);
+  pts.slice(1).forEach(p=>{const[x,y]=px(p[0],p[1]);ctx.lineTo(x,y)});
+  ctx.closePath();ctx.fillStyle=color;ctx.fill();
+  ctx.strokeStyle='#2a3a2a';ctx.lineWidth=0.8;ctx.stroke();
+}
+
+const ships={};
+let msgCount=0,msgPerMin=0,lastMinCount=0;
+
+function navStatus(s){
+  if(s===1||s===5)return'anchor';
+  if(s===0||s===8)return'transit';
+  return'slow';
+}
+function statusColor(s){
+  if(s==='anchor')return'#FF8833';
+  if(s==='transit')return'#FF6600';
+  return'#888';
+}
+
+function drawScene(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#0d1b2a';ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle='#1a2a3a';ctx.lineWidth=0.5;
+  for(let i=0;i<6;i++){const lat=24.5+i*0.7;const[,y]=px(0,lat);ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
+  for(let i=0;i<10;i++){const lng=54+i*0.6;const[x]=px(lng,0);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke()}
+  drawLand(IRAN,'#1e2a1a');drawLand(ARAB,'#1e2a1a');drawLand(MUSANDAM,'#243020');
+
+  const labels=[[55.2,27.35,'IRAN','#4a6a4a'],[55.5,24.55,'UAE / OMAN','#4a6a4a'],[54.8,26.2,'PERSIAN\nGULF','#1e4a6e'],[58.2,26.0,'GULF OF\nOMAN','#1e4a6e'],[56.4,26.82,'STRAIT OF\nHORMUZ','#FF6600'],[56.38,25.6,'MUSANDAM','#4a6a4a'],[56.35,27.35,'BANDAR\nABBAS','#556655']];
+  labels.forEach(([lng,lat,text,color])=>{
+    const[x,y]=px(lng,lat);ctx.fillStyle=color;ctx.font='bold 9px Courier New';ctx.textAlign='center';
+    text.split('\n').forEach((line,i)=>ctx.fillText(line,x,y+i*11));
+  });
+
+  Object.values(ships).forEach(s=>{
+    if(s.lng<LNG0||s.lng>LNG1||s.lat<LAT0||s.lat>LAT1)return;
+    const[x,y]=px(s.lng,s.lat);
+    const hdg=(s.hdg===511?s.cog:s.hdg)||0;
+    const rad=(hdg-90)*Math.PI/180;
+    const col=statusColor(s.status);
+    ctx.save();ctx.translate(x,y);ctx.rotate(rad);
+    ctx.beginPath();ctx.moveTo(8,0);ctx.lineTo(-5,4);ctx.lineTo(-3,0);ctx.lineTo(-5,-4);ctx.closePath();
+    ctx.fillStyle=col;ctx.strokeStyle='#000';ctx.lineWidth=0.8;ctx.fill();ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle='rgba(255,255,255,0.75)';ctx.font='7px Courier New';ctx.textAlign='left';
+    const name=(s.name||'UNKNOWN').split(' ')[0];
+    ctx.fillText(name,x+9,y+3);
+  });
+}
+
+function updateUI(){
+  const all=Object.values(ships);
+  document.getElementById('sv-all').textContent=all.length;
+  document.getElementById('sv-move').textContent=all.filter(s=>s.status==='transit').length;
+  document.getElementById('sv-anc').textContent=all.filter(s=>s.status==='anchor').length;
+  document.getElementById('sv-msg').textContent=msgPerMin;
+  document.getElementById('utc').textContent=new Date().toUTCString().slice(5,25)+' UTC';
+
+  const sorted=all.sort((a,b)=>(b.sog||0)-(a.sog||0));
+  const empty=document.getElementById('empty');
+  if(all.length>0&&empty)empty.remove();
+
+  document.getElementById('list').innerHTML=sorted.map(s=>{
+    const cls=s.status==='transit'?'tt':s.status==='anchor'?'ta':'ts';
+    const lbl=s.status==='transit'?'TRANSIT':s.status==='anchor'?'ANCHOR':'SLOW';
+    const hdg=s.hdg===511?s.cog:s.hdg;
+    return`<div class="row"><div style="font-size:12px">${s.flag||'🚢'}</div><div><div class="fn">${s.name||'UNKNOWN'}</div><div class="ft">MMSI: ${s.mmsi}</div></div><div class="spd">${(s.sog||0).toFixed(1)}</div><div class="hdg">${Math.round(hdg||0)}°</div><div style="text-align:center"><span class="tag ${cls}">${lbl}</span></div></div>`;
+  }).join('');
+
+  if(sorted.length>0){
+    document.getElementById('tick').textContent=sorted.map(s=>`🚢 ${s.name||s.mmsi}  ${(s.sog||0).toFixed(1)}kt  HDG:${Math.round(s.hdg===511?s.cog:s.hdg||0)}°  [${s.lat.toFixed(3)}N, ${s.lng.toFixed(3)}E]`).join('   ·   ');
+  }
+  drawScene();
+}
+
+function getFlag(mmsi){
+  const mid=String(mmsi).slice(0,3);
+  const flags={'412':'🇨🇳','413':'🇨🇳','414':'🇨🇳','419':'🇮🇳','422':'🇮🇷','423':'🇮🇷','432':'🇯🇵','440':'🇰🇷','441':'🇰🇷','477':'🇭🇰','525':'🇮🇩','564':'🇸🇬','565':'🇸🇬','566':'🇸🇬','603':'🇦🇪','470':'🇦🇪','622':'🇪🇬','636':'🇱🇷','657':'🇿🇦','304':'🇦🇬','309':'🇧🇸','311':'🇧🇸','319':'🇰🇾','338':'🇺🇸','351':'🇵🇦','352':'🇵🇦','353':'🇵🇦','354':'🇵🇦','355':'🇵🇦','356':'🇵🇦','357':'🇵🇦','370':'🇵🇦','371':'🇵🇦','372':'🇵🇦','373':'🇵🇦','376':'🇻🇨','205':'🇧🇪','209':'🇨🇾','210':'🇨🇾','212':'🇨🇾','215':'🇲🇹','229':'🇲🇹','232':'🇬🇧','233':'🇬🇧','235':'🇬🇧','237':'🇬🇷','239':'🇬🇷','240':'🇬🇷','241':'🇬🇷','247':'🇮🇹','248':'🇲🇹','249':'🇲🇹','255':'🇵🇹','256':'🇲🇹','257':'🇳🇴','258':'🇳🇴','259':'🇳🇴','261':'🇵🇱','269':'🇨🇭','271':'🇹🇷','272':'🇺🇦','273':'🇷🇺','276':'🇪🇪','278':'🇷🇺'};
+  return flags[mid]||'🚢';
+}
+
+let ws,reconnectTimer;
+function connect(){
+  const connEl=document.getElementById('conn');
+  const ldot=document.getElementById('ldot');
+  connEl.textContent='CONNECTING...';connEl.className='connecting';
+  ldot.className='off';
+  ws=new WebSocket('wss://stream.aisstream.io/v0/stream');
+  ws.onopen=()=>{
+    connEl.textContent='LIVE';connEl.className='';connEl.style.background='#1a2a1a';connEl.style.color='#5AC85A';
+    ldot.className='';
+    ws.send(JSON.stringify({
+      Apikey:API_KEY,
+      BoundingBoxes:[[[25.0,54.0],[27.5,59.5]]],
+      FilterMessageTypes:['PositionReport']
+    }));
+  };
+  ws.onmessage=e=>{
+    try{
+      const d=JSON.parse(e.data);
+      if(d.MessageType==='PositionReport'){
+        const m=d.MetaData;
+        const p=d.Message.PositionReport;
+        const mmsi=m.MMSI;
+        msgCount++;
+        ships[mmsi]={
+          mmsi,
+          name:(m.ShipName||'').trim()||String(mmsi),
+          lat:m.latitude,
+          lng:m.longitude,
+          sog:p.Sog||0,
+          cog:p.Cog||0,
+          hdg:p.TrueHeading||511,
+          status:navStatus(p.NavigationalStatus),
+          flag:getFlag(mmsi),
+          updated:Date.now()
+        };
+      }
+    }catch(err){}
+  };
+  ws.onerror=()=>{connEl.textContent='ERROR';connEl.className='disconnected';ldot.className='off'};
+  ws.onclose=()=>{
+    connEl.textContent='RECONNECTING...';connEl.className='connecting';ldot.className='off';
+    clearTimeout(reconnectTimer);reconnectTimer=setTimeout(connect,5000);
+  };
+}
+
+setInterval(()=>{
+  msgPerMin=msgCount-lastMinCount;
+  lastMinCount=msgCount;
+  const now=Date.now();
+  Object.keys(ships).forEach(k=>{if(now-ships[k].updated>300000)delete ships[k]});
+},60000);
+
+setInterval(updateUI,1000);
+connect();
+</script>
